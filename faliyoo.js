@@ -490,8 +490,9 @@ ${emoji} **${producto}**
 💵 **Precio unitario:** $${precioUnitario.toFixed(2)}  
 🧾 **Total generado:** $${total.toFixed(2)}`;
 
-        color = '#dc3545';
-        await guardarInventario();
+    color = '#dc3545';
+        inventarios.set(guildId, inventario);
+        await guardarInventarioServidor(guildId);
     }
 }
     
@@ -666,14 +667,16 @@ else if (customId.startsWith('op_price_')) {
         }
     }
 });
-// MANEJADOR PARA MODALES (NUEVO)
+// MANEJADOR PARA MODALES (CORREGIDO)
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isModalSubmit()) return;
-    registrarActividad(); // ← AGREGAR ESTA LÍNEA
+    registrarActividad();
 
     if (interaction.customId.startsWith('modal_price_')) {
         const productoEncoded = interaction.customId.replace('modal_price_', '');
         const producto = decodificarNombre(productoEncoded);
+        const guildId = interaction.guild.id; // ← LÍNEA AGREGADA
+        
         const nuevoPrecio = parseFloat(
             interaction.fields.getTextInputValue('precio_input').replace(/[^\d.]/g, '')
         );
@@ -686,13 +689,17 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
+        // CORREGIDO: Usar sistema de inventario por servidor
+        let inventario = await obtenerInventarioServidor(guildId);
+        
         // Inicializar producto si no existe
         if (!inventario[producto]) {
             inventario[producto] = { cantidad: 0, precio: 0 };
         }
 
         inventario[producto].precio = nuevoPrecio;
-        await guardarInventario();
+        inventarios.set(guildId, inventario); // ← LÍNEA AGREGADA
+        await guardarInventarioServidor(guildId); // ← LÍNEA CORREGIDA
 
         const emoji = obtenerEmojiProducto(producto);
         const embed = crearEmbed('✅ Precio Actualizado', '#28a745')
@@ -822,6 +829,20 @@ client.on('messageCreate', async (message) => {
 client.on('ready', async () => {
     console.log(`✅ Bot conectado: ${client.user.tag}`);
     client.user.setActivity('Inventario GTA RP 🔫', { type: ActivityType.Watching });
+    // Evento cuando el bot se une a un nuevo servidor
+client.on('guildCreate', async (guild) => {
+    console.log(`✅ Bot añadido a nuevo servidor: ${guild.name} (${guild.id})`);
+    await inicializarProductosServidor(guild.id);
+    console.log(`🎮 Inventario inicializado para ${guild.name}`);
+});
+
+// Evento cuando el bot es removido de un servidor
+client.on('guildDelete', (guild) => {
+    console.log(`❌ Bot removido del servidor: ${guild.name} (${guild.id})`);
+    // Limpiar cache local (la base de datos se mantiene por si vuelven a agregar el bot)
+    inventarios.delete(guild.id);
+    console.log(`🗑️ Cache limpiado para ${guild.name}`);
+});
     
     // Configurar sistema anti-inactividad
     await obtenerCanalNotificaciones();
@@ -865,6 +886,7 @@ setInterval(async () => {
     for (const guildId of inventarios.keys()) {
         await guardarInventarioServidor(guildId);
     }
+    console.log(`💾 Auto-guardado completado para ${inventarios.size} servidores`);
 }, 30000);
 setInterval(() => {
     const now = Date.now();
@@ -887,14 +909,24 @@ setInterval(async () => {
 // Manejar señales de cierre correctamente para Render
 process.on('SIGTERM', async () => {
     console.log('🛑 SIGTERM recibido - Cerrando bot...');
-    await guardarInventario();
+    // Guardar todos los inventarios antes de cerrar
+    for (const guildId of inventarios.keys()) {
+        await guardarInventarioServidor(guildId);
+    }
+    console.log('💾 Todos los inventarios guardados');
+    await mongoClient.close();
     client.destroy();
     process.exit(0);
 });
 
 process.on('SIGINT', async () => {
     console.log('🛑 SIGINT recibido - Cerrando bot...');
-    await guardarInventario();
+    // Guardar todos los inventarios antes de cerrar
+    for (const guildId of inventarios.keys()) {
+        await guardarInventarioServidor(guildId);
+    }
+    console.log('💾 Todos los inventarios guardados');
+    await mongoClient.close();
     client.destroy();
     process.exit(0);
 });
