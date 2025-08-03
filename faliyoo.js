@@ -201,24 +201,29 @@ async function obtenerCanalNotificaciones() {
     }
     
     try {
-        const canalesPreferidos = ['inventario', 'bot-logs', 'sistema', 'general'];
+        console.log('🔍 Buscando canal #inventario específicamente...');
         
         for (const guild of client.guilds.cache.values()) {
-            for (const nombreCanal of canalesPreferidos) {
-                const canal = guild.channels.cache.find(ch => 
-                    ch.name.toLowerCase().includes(nombreCanal) && 
-                    ch.isTextBased() &&
-                    ch.permissionsFor(guild.members.me)?.has(['SendMessages', 'ViewChannel'])
-                );
-                if (canal) {
-                    canalNotificaciones = canal;
-                    console.log(`✅ Canal encontrado: #${canal.name} en ${guild.name}`);
-                    return canal;
-                }
+            console.log(`🔍 Buscando en servidor: ${guild.name}`);
+            
+            // SOLO buscar canales que se llamen exactamente "inventario"
+            const canal = guild.channels.cache.find(ch => 
+                ch.name.toLowerCase() === 'inventario' && 
+                ch.isTextBased() &&
+                ch.permissionsFor(guild.members.me)?.has(['SendMessages', 'ViewChannel'])
+            );
+            
+            if (canal) {
+                canalNotificaciones = canal;
+                console.log(`✅ Canal #inventario encontrado en ${guild.name}`);
+                return canal;
+            } else {
+                console.log(`⚠️ No se encontró canal #inventario en ${guild.name}`);
             }
         }
         
-        console.log('⚠️ No se encontró canal específico, buscando cualquier canal...');
+        console.log('❌ No se encontró canal #inventario en ningún servidor');
+        console.log('ℹ️ El sistema anti-inactividad NO se activará sin canal #inventario');
         return null;
         
     } catch (error) {
@@ -232,33 +237,42 @@ function registrarActividad() {
 }
 
 async function enviarMensajeMantenimiento() {
-    const canal = await obtenerCanalNotificaciones();
-    if (!canal) return;
-
     try {
+        const canal = await obtenerCanalNotificaciones();
+        if (!canal) {
+            console.log('⚠️ Sistema anti-inactividad DESACTIVADO - No existe canal #inventario');
+            return false;
+        }
+
         contadorRefresh++;
         const mensaje = mensajesRefresh[Math.floor(Math.random() * mensajesRefresh.length)];
         
         const embed = new EmbedBuilder()
             .setColor('#28a745')
             .setTitle('🤖 Sistema Activo')
-            .setDescription(`${mensaje}\n\n🕐 **Uptime:** ${Math.floor(process.uptime() / 60)} minutos\n📈 **Refresh #${contadorRefresh}**`)
+            .setDescription(`${mensaje}\n\n🕐 **Uptime:** ${Math.floor(process.uptime() / 60)} minutos\n📈 **Refresh #${contadorRefresh}**\n🔄 **Última actividad:** <t:${Math.floor(ultimaActividad / 1000)}:R>`)
             .setTimestamp()
-            .setFooter({ text: 'Mantenimiento automático - Render' });
+            .setFooter({ text: 'Mantenimiento automático - Solo canal #inventario' });
 
         const mensajeEnviado = await canal.send({ embeds: [embed] });
 
         // Eliminar mensaje después de 30 segundos
         setTimeout(async () => {
             try {
-                await mensajeEnviado.delete();
-            } catch {}
+                if (mensajeEnviado && !mensajeEnviado.deleted) {
+                    await mensajeEnviado.delete();
+                }
+            } catch (deleteError) {
+                console.log('ℹ️ No se pudo eliminar mensaje de mantenimiento (normal)');
+            }
         }, 30000);
 
-        console.log(`🔄 Mensaje mantenimiento enviado (${new Date().toLocaleTimeString()})`);
+        console.log(`🔄 Mensaje mantenimiento enviado a #inventario #${contadorRefresh} (${new Date().toLocaleTimeString()})`);
+        return true;
         
     } catch (error) {
         console.error('❌ Error enviando mantenimiento:', error.message);
+        return false;
     }
 }
 // --- PANTALLAS CON BOTONES ---
@@ -843,11 +857,21 @@ client.on('ready', async () => {
     
     // Configurar sistema anti-inactividad
     setTimeout(async () => {
-        await obtenerCanalNotificaciones();
-        registrarActividad();
-        sistemaMantenimientoActivo = true;
-        console.log('🔄 Sistema anti-inactividad activado');
-    }, 5000);
+        const canal = await obtenerCanalNotificaciones();
+        if (canal) {
+            registrarActividad();
+            sistemaMantenimientoActivo = true;
+            
+            // ENVIAR MENSAJE DE PRUEBA SOLO SI HAY CANAL #inventario
+            console.log('🧪 Enviando mensaje de prueba a #inventario...');
+            await enviarMensajeMantenimiento();
+            
+            console.log('🔄 Sistema anti-inactividad activado para #inventario');
+        } else {
+            console.log('❌ Sistema anti-inactividad DESACTIVADO - Crea un canal llamado #inventario');
+            sistemaMantenimientoActivo = false;
+        }
+    }, 10000); // Esperar 10 segundos después de ready
     
     // Iniciar servidor HTTP para health checks
     const port = process.env.PORT || 3000;
@@ -896,16 +920,34 @@ setInterval(() => {
         }
     }
 }, 5 * 60 * 1000);
-// Sistema de monitoreo de inactividad
+// Sistema de monitoreo de inactividad MEJORADO
 setInterval(async () => {
     const tiempoInactivo = Date.now() - ultimaActividad;
     const minutos = Math.floor(tiempoInactivo / (1000 * 60));
     
-    if (minutos >= 10) { // 10 minutos sin actividad
-        await enviarMensajeMantenimiento();
-        registrarActividad();
+    console.log(`⏱️ Verificando inactividad: ${minutos} minutos sin actividad`);
+    
+    // Solo verificar si hay canal #inventario disponible
+    const canal = await obtenerCanalNotificaciones();
+    if (!canal) {
+        console.log('ℹ️ Sin canal #inventario - Sistema anti-inactividad pausado');
+        return;
     }
-}, 2 * 60 * 1000); // Verificar cada 2 minutos
+    
+    // Cambiar a 5 minutos para que sea más frecuente
+    if (minutos >= 5) { 
+       console.log(`🚨 Detectada inactividad de ${minutos} minutos - Enviando mensaje a #inventario...`);
+        const enviado = await enviarMensajeMantenimiento();
+        
+        if (enviado) {
+            registrarActividad(); // Solo reiniciar si se envió correctamente
+        } else {
+            console.log('⚠️ No se pudo enviar mensaje de mantenimiento');
+        }
+    } else {
+        console.log(`✅ Sistema activo en #inventario (${minutos}m inactivo)`);
+    }
+}, 1 * 60 * 1000); // Verificar cada 1 minuto para más frecuencia
 // Manejar señales de cierre correctamente para Render
 process.on('SIGTERM', async () => {
     console.log('🛑 SIGTERM recibido - Cerrando bot...');
