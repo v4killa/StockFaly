@@ -1,0 +1,16 @@
+{
+  "name": "Faliyoo",
+  "version": "1.0.0",
+  "main": "faliyoo.js",
+  "scripts": {
+    "start": "node faliyoo.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3",
+    "dotenv": "^16.5.0",
+    "mongodb": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
