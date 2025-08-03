@@ -13,6 +13,7 @@ const MONGODB_URI = process.env.MONGODB_URI;
 let ultimaActividad = Date.now();
 let canalNotificaciones = null;
 let contadorRefresh = 0;
+let sistemaMantenimientoActivo = false;
 
 const mensajesRefresh = [
     '🔧 Sistema activo - Inventario sincronizado',
@@ -195,10 +196,12 @@ function decodificarNombre(nombreCodificado) {
 }
 // --- FUNCIONES ANTI-INACTIVIDAD ---
 async function obtenerCanalNotificaciones() {
-    if (canalNotificaciones) return canalNotificaciones;
+    if (canalNotificaciones && !canalNotificaciones.deleted) {
+        return canalNotificaciones;
+    }
     
     try {
-        const canalesPreferidos = ['bot-logs', 'sistema', 'general', 'inventario'];
+        const canalesPreferidos = ['inventario', 'bot-logs', 'sistema', 'general'];
         
         for (const guild of client.guilds.cache.values()) {
             for (const nombreCanal of canalesPreferidos) {
@@ -209,26 +212,19 @@ async function obtenerCanalNotificaciones() {
                 );
                 if (canal) {
                     canalNotificaciones = canal;
-                    console.log(`✅ Canal de notificaciones: #${canal.name}`);
+                    console.log(`✅ Canal encontrado: #${canal.name} en ${guild.name}`);
                     return canal;
                 }
             }
-            
-            // Si no encuentra canales específicos, usar el primero disponible
-            const canalGeneral = guild.channels.cache.find(ch => 
-                ch.isTextBased() &&
-                ch.permissionsFor(guild.members.me)?.has(['SendMessages', 'ViewChannel'])
-            );
-            if (canalGeneral) {
-                canalNotificaciones = canalGeneral;
-                console.log(`✅ Canal de notificaciones: #${canalGeneral.name}`);
-                return canalGeneral;
-            }
         }
+        
+        console.log('⚠️ No se encontró canal específico, buscando cualquier canal...');
+        return null;
+        
     } catch (error) {
         console.error('❌ Error configurando canal:', error.message);
+        return null;
     }
-    return null;
 }
 
 function registrarActividad() {
@@ -826,10 +822,8 @@ client.on('messageCreate', async (message) => {
 });
 
 // --- EVENTOS Y CONFIGURACIÓN ---
-client.on('ready', async () => {
-    console.log(`✅ Bot conectado: ${client.user.tag}`);
-    client.user.setActivity('Inventario GTA RP 🔫', { type: ActivityType.Watching });
-    // Evento cuando el bot se une a un nuevo servidor
+
+// Evento cuando el bot se une a un nuevo servidor
 client.on('guildCreate', async (guild) => {
     console.log(`✅ Bot añadido a nuevo servidor: ${guild.name} (${guild.id})`);
     await inicializarProductosServidor(guild.id);
@@ -839,14 +833,21 @@ client.on('guildCreate', async (guild) => {
 // Evento cuando el bot es removido de un servidor
 client.on('guildDelete', (guild) => {
     console.log(`❌ Bot removido del servidor: ${guild.name} (${guild.id})`);
-    // Limpiar cache local (la base de datos se mantiene por si vuelven a agregar el bot)
     inventarios.delete(guild.id);
     console.log(`🗑️ Cache limpiado para ${guild.name}`);
 });
+
+client.on('ready', async () => {
+    console.log(`✅ Bot conectado: ${client.user.tag}`);
+    client.user.setActivity('Inventario GTA RP 🔫', { type: ActivityType.Watching });
     
     // Configurar sistema anti-inactividad
-    await obtenerCanalNotificaciones();
-    registrarActividad();
+    setTimeout(async () => {
+        await obtenerCanalNotificaciones();
+        registrarActividad();
+        sistemaMantenimientoActivo = true;
+        console.log('🔄 Sistema anti-inactividad activado');
+    }, 5000);
     
     // Iniciar servidor HTTP para health checks
     const port = process.env.PORT || 3000;
@@ -876,7 +877,6 @@ client.on('guildDelete', (guild) => {
     }
     
     console.log(`🎮 Bot listo para ${client.guilds.cache.size} servidores`);
-    
     console.log('🔄 Sistema anti-inactividad activado para Render');
 });
 
